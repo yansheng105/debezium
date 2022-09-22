@@ -78,6 +78,8 @@ public class OracleConnectorTask extends BaseSourceTask<OraclePartition, OracleO
         this.queue = new ChangeEventQueue.Builder<DataChangeEvent>()
                 .pollInterval(connectorConfig.getPollInterval())
                 .maxBatchSize(connectorConfig.getMaxBatchSize())
+                .rateLimit(connectorConfig.getRateLimit())
+                .rateLimitWarmupPeriod(connectorConfig.getRateLimitWarmupPeriod())
                 .maxQueueSize(connectorConfig.getMaxQueueSize())
                 .loggingContextSupplier(() -> taskContext.configureLoggingContext(CONTEXT_NAME))
                 .build();

@@ -475,6 +475,22 @@ public abstract class CommonConnectorConfig {
             .withDescription(
                     "The name of the transaction metadata topic. The placeholder ${database.server.name} can be used for referring to the connector's logical name; defaults to ${database.server.name}.transaction.");
 
+    public static final Field RATE_LIMIT = Field.create("rate.limit")
+            .withDisplayName("rate limit")
+            .withType(Type.DOUBLE)
+            .withDefault(0)
+            .withWidth(Width.SHORT)
+            .withImportance(Importance.MEDIUM)
+            .withDescription("rate unit is MB/s");
+
+    public static final Field RATE_LIMIT_WARMUP_PERIOD = Field.create("rate.limit.warmup.period")
+            .withDisplayName("rate limit warmup period")
+            .withType(Type.INT)
+            .withDefault(0)
+            .withWidth(Width.SHORT)
+            .withImportance(Importance.MEDIUM)
+            .withDescription("time unit is second");
+
     protected static final ConfigDefinition CONFIG_DEFINITION = ConfigDefinition.editor()
             .connector(
                     EVENT_PROCESSING_FAILURE_HANDLING_MODE,
@@ -489,7 +505,9 @@ public abstract class CommonConnectorConfig {
                     SNAPSHOT_FETCH_SIZE,
                     SNAPSHOT_MAX_THREADS,
                     RETRIABLE_RESTART_WAIT,
-                    QUERY_FETCH_SIZE)
+                    QUERY_FETCH_SIZE,
+                    RATE_LIMIT,
+                    RATE_LIMIT_WARMUP_PERIOD)
             .events(
                     CUSTOM_CONVERTERS,
                     SANITIZE_FIELD_NAMES,
@@ -526,6 +544,8 @@ public abstract class CommonConnectorConfig {
     private final String signalingDataCollection;
     private final EnumSet<Operation> skippedOperations;
     private final String transactionTopic;
+    private final double rateLimit;
+    private final int rateLimitWarmupPeriod;
 
     protected CommonConnectorConfig(Configuration config, String logicalName, int defaultSnapshotFetchSize) {
         this.config = config;
@@ -553,6 +573,8 @@ public abstract class CommonConnectorConfig {
         this.signalingDataCollection = config.getString(SIGNAL_DATA_COLLECTION);
         this.skippedOperations = determineSkippedOperations(config);
         this.transactionTopic = config.getString(TRANSACTION_TOPIC).replace("${database.server.name}", logicalName);
+        this.rateLimit = config.getNumber(RATE_LIMIT).doubleValue();
+        this.rateLimitWarmupPeriod = config.getInteger(RATE_LIMIT_WARMUP_PERIOD);
     }
 
     private static EnumSet<Envelope.Operation> determineSkippedOperations(Configuration config) {
@@ -656,6 +678,14 @@ public abstract class CommonConnectorConfig {
      */
     public String getTransactionTopic() {
         return transactionTopic;
+    }
+
+    public double getRateLimit() {
+        return rateLimit;
+    }
+
+    public int getRateLimitWarmupPeriod() {
+        return rateLimitWarmupPeriod;
     }
 
     /**

@@ -120,6 +120,8 @@ public final class MongoDbConnectorTask extends BaseSourceTask<MongoDbPartition,
             this.queue = new ChangeEventQueue.Builder<DataChangeEvent>()
                     .pollInterval(connectorConfig.getPollInterval())
                     .maxBatchSize(connectorConfig.getMaxBatchSize())
+                    .rateLimit(connectorConfig.getRateLimit())
+                    .rateLimitWarmupPeriod(connectorConfig.getRateLimitWarmupPeriod())
                     .maxQueueSize(connectorConfig.getMaxQueueSize())
                     .maxQueueSizeInBytes(connectorConfig.getMaxQueueSizeInBytes())
                     .loggingContextSupplier(() -> taskContext.configureLoggingContext(CONTEXT_NAME))

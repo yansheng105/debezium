@@ -96,6 +96,8 @@ public class SqlServerConnectorTask extends BaseSourceTask<SqlServerPartition, S
         this.queue = new ChangeEventQueue.Builder<DataChangeEvent>()
                 .pollInterval(connectorConfig.getPollInterval())
                 .maxBatchSize(connectorConfig.getMaxBatchSize())
+                .rateLimit(connectorConfig.getRateLimit())
+                .rateLimitWarmupPeriod(connectorConfig.getRateLimitWarmupPeriod())
                 .maxQueueSize(connectorConfig.getMaxQueueSize())
                 .maxQueueSizeInBytes(connectorConfig.getMaxQueueSizeInBytes())
                 .loggingContextSupplier(() -> taskContext.configureLoggingContext(CONTEXT_NAME))

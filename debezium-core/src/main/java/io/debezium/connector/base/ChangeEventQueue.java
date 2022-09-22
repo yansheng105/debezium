@@ -5,18 +5,23 @@
  */
 package io.debezium.connector.base;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.common.util.concurrent.RateLimiter;
 
 import io.debezium.annotation.SingleThreadAccess;
 import io.debezium.annotation.ThreadSafe;
@@ -81,8 +86,15 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
 
     private volatile RuntimeException producerException;
 
+    private RateLimiter limiter = null;
+
     private ChangeEventQueue(Duration pollInterval, int maxQueueSize, int maxBatchSize, Supplier<LoggingContext.PreviousContext> loggingContextSupplier,
                              long maxQueueSizeInBytes, boolean buffering) {
+        this(pollInterval, maxQueueSize, maxBatchSize, 0, 0, loggingContextSupplier, maxQueueSizeInBytes, buffering);
+    }
+
+    private ChangeEventQueue(Duration pollInterval, int maxQueueSize, int maxBatchSize, double rateLimit, int rateLimitWarmupPeriod,
+                             Supplier<LoggingContext.PreviousContext> loggingContextSupplier, long maxQueueSizeInBytes, boolean buffering) {
         this.pollInterval = pollInterval;
         this.maxBatchSize = maxBatchSize;
         this.maxQueueSize = maxQueueSize;
@@ -91,6 +103,15 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
         this.sizeInBytesQueue = new ArrayDeque<>(maxQueueSize);
         this.maxQueueSizeInBytes = maxQueueSizeInBytes;
         this.buffering = buffering;
+        if (rateLimit > 0) {
+            if (rateLimitWarmupPeriod > 0) {
+                // kb
+                limiter = RateLimiter.create(rateLimit * 1024, rateLimitWarmupPeriod, TimeUnit.SECONDS);
+            }
+            else {
+                limiter = RateLimiter.create(rateLimit * 1024);
+            }
+        }
     }
 
     public static class Builder<T> {
@@ -98,6 +119,8 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
         private Duration pollInterval;
         private int maxQueueSize;
         private int maxBatchSize;
+        private double rateLimit;
+        private int rateLimitWarmupPeriod;
         private Supplier<LoggingContext.PreviousContext> loggingContextSupplier;
         private long maxQueueSizeInBytes;
         private boolean buffering;
@@ -117,6 +140,16 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
             return this;
         }
 
+        public Builder<T> rateLimit(double rateLimit) {
+            this.rateLimit = rateLimit;
+            return this;
+        }
+
+        public Builder<T> rateLimitWarmupPeriod(int rateLimitWarmupPeriod) {
+            this.rateLimitWarmupPeriod = rateLimitWarmupPeriod;
+            return this;
+        }
+
         public Builder<T> loggingContextSupplier(Supplier<LoggingContext.PreviousContext> loggingContextSupplier) {
             this.loggingContextSupplier = loggingContextSupplier;
             return this;
@@ -133,7 +166,8 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
         }
 
         public ChangeEventQueue<T> build() {
-            return new ChangeEventQueue<T>(pollInterval, maxQueueSize, maxBatchSize, loggingContextSupplier, maxQueueSizeInBytes, buffering);
+            return new ChangeEventQueue<T>(pollInterval, maxQueueSize, maxBatchSize, rateLimit, rateLimitWarmupPeriod, loggingContextSupplier, maxQueueSizeInBytes,
+                    buffering);
         }
     }
 
@@ -204,10 +238,19 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
                 this.wait(pollInterval.toMillis());
             }
 
+            long messageSize = 0;
+            // 加入限流逻辑
+            if (null != limiter) {
+                messageSize = ObjectSizeCalculator.getObjectSize(record);
+                // 申请 n KB 个令牌
+                limiter.acquire(Math.max(1, BigDecimal.valueOf(messageSize / (8192.0)).setScale(0, RoundingMode.HALF_UP).intValue()));
+            }
             queue.add(record);
             // If we pass a positiveLong max.queue.size.in.bytes to enable handling queue size in bytes feature
             if (maxQueueSizeInBytes > 0) {
-                long messageSize = ObjectSizeCalculator.getObjectSize(record);
+                if (null == limiter) {
+                    messageSize = ObjectSizeCalculator.getObjectSize(record);
+                }
                 sizeInBytesQueue.add(messageSize);
                 currentQueueSizeInBytes += messageSize;
             }
