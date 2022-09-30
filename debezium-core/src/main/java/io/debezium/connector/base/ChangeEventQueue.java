@@ -7,6 +7,7 @@ package io.debezium.connector.base;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -27,11 +28,8 @@ import io.debezium.annotation.SingleThreadAccess;
 import io.debezium.annotation.ThreadSafe;
 import io.debezium.config.ConfigurationDefaults;
 import io.debezium.time.Temporals;
-import io.debezium.util.Clock;
-import io.debezium.util.LoggingContext;
+import io.debezium.util.*;
 import io.debezium.util.LoggingContext.PreviousContext;
-import io.debezium.util.ObjectSizeCalculator;
-import io.debezium.util.Threads;
 import io.debezium.util.Threads.Timer;
 
 /**
@@ -200,6 +198,14 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
             }
         }
 
+        // 加入限流逻辑
+        if (null != limiter) {
+            // 申请N KB个令牌
+            limiter.acquire(
+                    Math.max(1, BigDecimal.valueOf(record.toString().getBytes(StandardCharsets.UTF_8).length / 1024.0).setScale(0, RoundingMode.UP).intValue()));
+            // limiter.acquire(Math.max(1, BigDecimal.valueOf(RamUsageEstimator.sizeOf(record) / 1024.0).setScale(0, RoundingMode.HALF_UP).intValue()));
+        }
+
         doEnqueue(record);
     }
 
@@ -238,19 +244,10 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
                 this.wait(pollInterval.toMillis());
             }
 
-            long messageSize = 0;
-            // 加入限流逻辑
-            if (null != limiter) {
-                messageSize = ObjectSizeCalculator.getObjectSize(record);
-                // 申请 n KB 个令牌
-                limiter.acquire(Math.max(1, BigDecimal.valueOf(messageSize / (8192.0)).setScale(0, RoundingMode.HALF_UP).intValue()));
-            }
             queue.add(record);
             // If we pass a positiveLong max.queue.size.in.bytes to enable handling queue size in bytes feature
             if (maxQueueSizeInBytes > 0) {
-                if (null == limiter) {
-                    messageSize = ObjectSizeCalculator.getObjectSize(record);
-                }
+                long messageSize = ObjectSizeCalculator.getObjectSize(record);
                 sizeInBytesQueue.add(messageSize);
                 currentQueueSizeInBytes += messageSize;
             }
